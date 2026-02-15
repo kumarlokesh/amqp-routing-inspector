@@ -1,0 +1,27 @@
+# Build artifacts
+bin/
+dist/
+*.exe
+*.out
+*.test
+coverage.out
+coverage.html
+
+# Go modules
+vendor/
+
+# IDE and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Environment files
+.env
+.env.*
+
+# Logs
+*.log
+
+# Local Docker data
+.rabbitmq-data/

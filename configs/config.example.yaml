@@ -1,0 +1,25 @@
+# Example configuration for amqp-routing-inspector
+rabbitmq_url: amqp://guest:guest@localhost:5672/
+firehose_exchange: amq.rabbitmq.trace
+
+# Leave empty to create an ephemeral queue at runtime.
+queue_name: ""
+consumer_tag: amqp-routing-inspector
+
+# Supported values: cli, json, dot
+output_format: cli
+
+# Optional filters
+filter_exchange: ""
+filter_queue: ""
+
+# Stop after N matched events. 0 = unlimited stream.
+max_events: 0
+
+# AMQP QoS and reconnect strategy
+prefetch: 200
+reconnect_initial: 1s
+reconnect_max: 30s
+
+# Used when output_format=dot
+graph_name: routing

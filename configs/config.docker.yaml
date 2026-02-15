@@ -1,0 +1,12 @@
+rabbitmq_url: amqp://guest:guest@rabbitmq:5672/
+firehose_exchange: amq.rabbitmq.trace
+queue_name: amqp-routing-inspector.trace
+consumer_tag: amqp-routing-inspector
+output_format: cli
+filter_exchange: ""
+filter_queue: ""
+max_events: 0
+prefetch: 200
+reconnect_initial: 1s
+reconnect_max: 20s
+graph_name: routing

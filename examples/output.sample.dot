@@ -1,0 +1,9 @@
+digraph "routing" {
+  rankdir=LR;
+  node [fontname="Helvetica"];
+  "ex:orders" [label="exchange: orders", shape=box, style="rounded,filled", fillcolor="#E8F1FF"];
+  "q:payments.q" [label="queue: payments.q", shape=ellipse, style="filled", fillcolor="#FFF4E6"];
+  "q:analytics.q" [label="queue: analytics.q", shape=ellipse, style="filled", fillcolor="#FFF4E6"];
+  "ex:orders" -> "q:payments.q" [label="order.created (12)"];
+  "ex:orders" -> "q:analytics.q" [label="order.* (12)"];
+}

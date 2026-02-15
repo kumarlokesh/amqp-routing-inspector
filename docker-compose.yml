@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: amqp-routing-inspector-rabbitmq
+    hostname: rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - ./.rabbitmq-data:/var/lib/rabbitmq
+    command: >-
+      sh -ec '
+      rabbitmq-plugins enable --offline rabbitmq_management rabbitmq_tracing;
+      exec rabbitmq-server
+      '
+
+  inspector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: amqp-routing-inspector
+    depends_on:
+      - rabbitmq
+    command: ["--config", "/app/configs/config.docker.yaml"]
+    volumes:
+      - ./configs:/app/configs:ro
