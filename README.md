@@ -23,7 +23,6 @@ RabbitMQ routing bugs are often hard to explain from queue depth alone. This too
   - `json` (machine-readable stream)
   - `dot` (routing graph for Graphviz)
 - Graceful shutdown with signal handling.
-- Unit tests plus opt-in integration test path.
 
 ## Requirements
 

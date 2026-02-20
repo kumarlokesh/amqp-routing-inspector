@@ -22,6 +22,6 @@ type RoutingEvent struct {
 
 // RoutingTrace keeps an event with resolved destinations for reporting.
 type RoutingTrace struct {
-	Event        RoutingEvent        `json:"event" yaml:"event"`
+	Event        RoutingEvent       `json:"event" yaml:"event"`
 	Destinations []QueueDestination `json:"destinations" yaml:"destinations"`
 }

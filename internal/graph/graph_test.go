@@ -49,7 +49,7 @@ func TestGraphAddTraceFallbackUnrouted(t *testing.T) {
 func TestGraphDOTContainsNodesAndEdges(t *testing.T) {
 	g := New("routing")
 	g.AddTrace(model.RoutingTrace{
-		Event: model.RoutingEvent{ExchangeName: "orders", RoutingKey: "order.created", Timestamp: time.Now()},
+		Event:        model.RoutingEvent{ExchangeName: "orders", RoutingKey: "order.created", Timestamp: time.Now()},
 		Destinations: []model.QueueDestination{{QueueName: "shipping.q", BindingKey: "order.*"}},
 	})
 

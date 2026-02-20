@@ -78,7 +78,7 @@ func (g *Graph) Edges() []Edge {
 	for _, edge := range g.edges {
 		out = append(out, *edge)
 	}
-	
+
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].FromExchange != out[j].FromExchange {
 			return out[i].FromExchange < out[j].FromExchange
