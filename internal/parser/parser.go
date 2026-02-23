@@ -30,13 +30,14 @@ func NewWithClock(now func() time.Time) *EventParser {
 // ParseDelivery extracts routing metadata from a firehose delivery.
 func (p *EventParser) ParseDelivery(d amqp.Delivery) (model.RoutingEvent, error) {
 	headers := d.Headers
+	routingKeyFromHeaders := parseRoutingKey(headers)
 	eventType := firstNonEmpty(
 		headerString(headers, "event_type", "event-type", "event"),
 		parseEventTypeFromRoutingKey(d.RoutingKey),
 	)
-	routingKey := firstNonEmpty(parseRoutingKey(headers), d.RoutingKey)
+	routingKey := firstNonEmpty(routingKeyFromHeaders, d.RoutingKey)
 
-	exchangeFromRoutingKey := parseExchangeFromFirehoseRoutingKey(d.RoutingKey, eventType, routingKey)
+	exchangeFromRoutingKey := parseExchangeFromFirehoseRoutingKey(d.RoutingKey, eventType, routingKeyFromHeaders)
 
 	event := model.RoutingEvent{
 		ExchangeName: firstNonEmpty(
@@ -60,7 +61,7 @@ func (p *EventParser) ParseDelivery(d amqp.Delivery) (model.RoutingEvent, error)
 		event.Timestamp = event.Timestamp.UTC()
 	}
 
-	destinations, err := parseDestinations(headers, eventType, d.RoutingKey, routingKey)
+	destinations, err := parseDestinations(headers, eventType, d.RoutingKey, routingKeyFromHeaders)
 	if err != nil {
 		return model.RoutingEvent{}, fmt.Errorf("parse destinations: %w", err)
 	}
@@ -262,6 +263,10 @@ func parseExchangeFromFirehoseRoutingKey(firehoseRoutingKey, eventType, parsedRo
 		}
 	}
 
+	if eventType == "publish" {
+		return remainder
+	}
+
 	parts := strings.Split(remainder, ".")
 	return strings.TrimSpace(parts[0])
 }
@@ -283,11 +288,7 @@ func parseDeliverQueueFromFirehoseRoutingKey(firehoseRoutingKey, parsedRoutingKe
 		}
 	}
 
-	parts := strings.Split(remainder, ".")
-	if len(parts) == 0 {
-		return ""
-	}
-	return strings.TrimSpace(parts[0])
+	return remainder
 }
 
 func parseEventTypeFromRoutingKey(routingKey string) string {
