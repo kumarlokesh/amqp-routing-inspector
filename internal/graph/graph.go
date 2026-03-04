@@ -147,7 +147,7 @@ func mapKeys[K comparable](in map[K]struct{}) []K {
 }
 
 func escape(value string) string {
-	replacer := strings.NewReplacer(`\\`, `\\\\`, `"`, `\\"`)
+	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
 	return replacer.Replace(value)
 }
 
