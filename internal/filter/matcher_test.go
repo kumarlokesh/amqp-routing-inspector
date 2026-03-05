@@ -21,6 +21,23 @@ func makeTrace(exchange, eventType, routingKey string, queues ...string) model.R
 	}
 }
 
+func TestNewMatcherInitialization(t *testing.T) {
+	m := NewMatcher("  orders-* ", " payments.q\t", "order.#", " PUBLISH ")
+
+	if m.exchange != "orders-*" {
+		t.Errorf("exchange: got %q, want %q", m.exchange, "orders-*")
+	}
+	if m.queue != "payments.q" {
+		t.Errorf("queue: got %q, want %q", m.queue, "payments.q")
+	}
+	if m.routingKey != "order.#" {
+		t.Errorf("routingKey: got %q, want %q", m.routingKey, "order.#")
+	}
+	if m.eventType != "publish" {
+		t.Errorf("eventType: got %q, want %q (should be lowercased)", m.eventType, "publish")
+	}
+}
+
 func TestMatcherNoFilterMatchesAll(t *testing.T) {
 	m := NewMatcher("", "", "", "")
 	if !m.Match(makeTrace("orders", "publish", "order.created", "payments.q")) {
@@ -67,6 +84,19 @@ func TestMatcherExchangeWildcardStar(t *testing.T) {
 	}
 }
 
+func TestMatcherExchangeQuestionMarkGlob(t *testing.T) {
+	m := NewMatcher("order?", "", "", "")
+	if !m.Match(makeTrace("orders", "publish", "rk")) {
+		t.Fatal("? should match single character")
+	}
+	if m.Match(makeTrace("order", "publish", "rk")) {
+		t.Fatal("? should not match zero characters")
+	}
+	if m.Match(makeTrace("orders1", "publish", "rk")) {
+		t.Fatal("? should not match two characters")
+	}
+}
+
 // ── Queue filter ──────────────────────────────────────────────────────────────
 
 func TestMatcherQueueExact(t *testing.T) {
@@ -87,6 +117,20 @@ func TestMatcherQueueGlob(t *testing.T) {
 	}
 	if m.Match(makeTrace("orders", "publish", "rk", "billing.q")) {
 		t.Fatal("glob should not match billing.q")
+	}
+}
+
+func TestMatcherQueueWildcardStar(t *testing.T) {
+	m := NewMatcher("", "*", "", "")
+	if !m.Match(makeTrace("ex", "publish", "rk", "anything.q")) {
+		t.Fatal("* should match any queue")
+	}
+}
+
+func TestMatcherQueueNoDestinations(t *testing.T) {
+	m := NewMatcher("", "target.q", "", "")
+	if m.Match(makeTrace("ex", "publish", "rk")) {
+		t.Fatal("should not match when there are no destinations")
 	}
 }
 
