@@ -99,3 +99,78 @@ func TestLoadValidationError(t *testing.T) {
 		t.Fatalf("expected invalid format error")
 	}
 }
+
+func TestLoadNewFilterFlags(t *testing.T) {
+	cfg, err := Load([]string{
+		"--filter-routing-key", "order.*",
+		"--filter-event", "publish",
+		"--warn-unrouted",
+		"--show-body-bytes", "256",
+	})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.FilterRoutingKey != "order.*" {
+		t.Fatalf("unexpected FilterRoutingKey: %q", cfg.FilterRoutingKey)
+	}
+	if cfg.FilterEvent != "publish" {
+		t.Fatalf("unexpected FilterEvent: %q", cfg.FilterEvent)
+	}
+	if !cfg.WarnUnrouted {
+		t.Fatalf("expected WarnUnrouted to be true")
+	}
+	if cfg.ShowBodyBytes != 256 {
+		t.Fatalf("unexpected ShowBodyBytes: %d", cfg.ShowBodyBytes)
+	}
+}
+
+func TestLoadValidatesFilterEvent(t *testing.T) {
+	_, err := Load([]string{"--filter-event", "invalid"})
+	if err == nil {
+		t.Fatal("expected validation error for invalid filter-event")
+	}
+}
+
+func TestLoadNewFormatConstants(t *testing.T) {
+	for _, format := range []string{FormatSummary, FormatMermaid} {
+		cfg, err := Load([]string{"--output", format})
+		if err != nil {
+			t.Fatalf("Load() with format=%q error = %v", format, err)
+		}
+		if cfg.OutputFormat != format {
+			t.Fatalf("expected output format %q, got %q", format, cfg.OutputFormat)
+		}
+	}
+}
+
+func TestLoadRequiresMetricsAddrForPrometheus(t *testing.T) {
+	_, err := Load([]string{"--output", "prometheus"})
+	if err == nil {
+		t.Fatal("expected error when --output prometheus without --metrics-addr")
+	}
+}
+
+func TestLoadRequiresStatsdAddrForStatsd(t *testing.T) {
+	_, err := Load([]string{"--output", "statsd"})
+	if err == nil {
+		t.Fatal("expected error when --output statsd without --statsd-addr")
+	}
+}
+
+func TestLoadRequiresWebAddrForWeb(t *testing.T) {
+	_, err := Load([]string{"--output", "web"})
+	if err == nil {
+		t.Fatal("expected error when --output web without --web-addr")
+	}
+}
+
+func TestLoadPrometheusWithAddr(t *testing.T) {
+	cfg, err := Load([]string{"--output", "prometheus", "--metrics-addr", ":9090"})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.MetricsAddr != ":9090" {
+		t.Fatalf("unexpected MetricsAddr: %q", cfg.MetricsAddr)
+	}
+}

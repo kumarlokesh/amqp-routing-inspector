@@ -11,12 +11,19 @@ import (
 
 // EventParser parses incoming firehose deliveries into routing events.
 type EventParser struct {
-	now func() time.Time
+	now          func() time.Time
+	maxBodyBytes int
 }
 
 // New creates a parser using time.Now for fallback timestamps.
 func New() *EventParser {
 	return &EventParser{now: time.Now}
+}
+
+// NewWithConfig creates a parser with body preview support.
+// maxBodyBytes controls how many bytes of the message body to include (0 disables).
+func NewWithConfig(maxBodyBytes int) *EventParser {
+	return &EventParser{now: time.Now, maxBodyBytes: maxBodyBytes}
 }
 
 // NewWithClock creates a parser with deterministic clock source (for tests).
@@ -66,6 +73,14 @@ func (p *EventParser) ParseDelivery(d amqp.Delivery) (model.RoutingEvent, error)
 		return model.RoutingEvent{}, fmt.Errorf("parse destinations: %w", err)
 	}
 	event.Destinations = dedupeDestinations(destinations)
+
+	if p.maxBodyBytes > 0 && len(d.Body) > 0 {
+		body := d.Body
+		if len(body) > p.maxBodyBytes {
+			body = body[:p.maxBodyBytes]
+		}
+		event.BodyPreview = string(body)
+	}
 
 	return event, nil
 }

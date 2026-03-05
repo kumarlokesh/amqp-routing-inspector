@@ -18,6 +18,8 @@ type RoutingEvent struct {
 	Timestamp     time.Time          `json:"timestamp" yaml:"timestamp"`
 	EventType     string             `json:"event_type,omitempty" yaml:"event_type,omitempty"`
 	Destinations  []QueueDestination `json:"destinations,omitempty" yaml:"destinations,omitempty"`
+	// BodyPreview holds the first N bytes of the message body when --show-body-bytes > 0.
+	BodyPreview string `json:"body_preview,omitempty" yaml:"body_preview,omitempty"`
 }
 
 // RoutingTrace keeps an event with resolved destinations for reporting.

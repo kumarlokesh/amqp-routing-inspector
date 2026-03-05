@@ -137,3 +137,35 @@ func TestParseDeliveryPreservesDottedQueueFromDeliverRoutingKey(t *testing.T) {
 		t.Fatalf("expected dotted queue name billing.retry.q, got %q", event.Destinations[0].QueueName)
 	}
 }
+
+func TestParseDeliveryBodyPreview(t *testing.T) {
+	p := NewWithConfig(10)
+
+	event, err := p.ParseDelivery(amqp.Delivery{
+		RoutingKey: "publish.orders.created",
+		Body:       []byte("hello world, this is a long body"),
+	})
+	if err != nil {
+		t.Fatalf("ParseDelivery() error = %v", err)
+	}
+
+	if event.BodyPreview != "hello worl" {
+		t.Fatalf("expected body preview truncated to 10 bytes, got %q", event.BodyPreview)
+	}
+}
+
+func TestParseDeliveryBodyPreviewDisabled(t *testing.T) {
+	p := New() // maxBodyBytes = 0
+
+	event, err := p.ParseDelivery(amqp.Delivery{
+		RoutingKey: "publish.orders.created",
+		Body:       []byte("some body content"),
+	})
+	if err != nil {
+		t.Fatalf("ParseDelivery() error = %v", err)
+	}
+
+	if event.BodyPreview != "" {
+		t.Fatalf("expected empty body preview when disabled, got %q", event.BodyPreview)
+	}
+}

@@ -168,3 +168,50 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
+// Mermaid renders the graph in Mermaid flowchart format (left-to-right).
+func (g *Graph) Mermaid() string {
+	var builder strings.Builder
+	builder.WriteString("flowchart LR\n")
+
+	exchanges := mapKeys(g.exchanges)
+	queues := mapKeys(g.queues)
+
+	for _, exchange := range exchanges {
+		nodeID := mermaidID("ex_" + exchange)
+		builder.WriteString(fmt.Sprintf("  %s[\"exchange: %s\"]\n", nodeID, mermaidEscape(exchange)))
+	}
+
+	for _, queue := range queues {
+		nodeID := mermaidID("q_" + queue)
+		builder.WriteString(fmt.Sprintf("  %s([\"queue: %s\"])\n", nodeID, mermaidEscape(queue)))
+	}
+
+	for _, edge := range g.Edges() {
+		fromID := mermaidID("ex_" + edge.FromExchange)
+		toID := mermaidID("q_" + edge.ToQueue)
+		label := fmt.Sprintf("%s (%d)", edge.Label, edge.Count)
+		builder.WriteString(fmt.Sprintf("  %s -- \"%s\" --> %s\n", fromID, mermaidEscape(label), toID))
+	}
+
+	return builder.String()
+}
+
+// mermaidID converts a string to a safe Mermaid node identifier.
+func mermaidID(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+	}
+	return b.String()
+}
+
+// mermaidEscape escapes characters that have special meaning inside Mermaid quoted labels.
+func mermaidEscape(s string) string {
+	s = strings.ReplaceAll(s, `"`, "&quot;")
+	return s
+}

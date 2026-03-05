@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kumarlokesh/amqp-routing-inspector/internal/config"
 	"github.com/kumarlokesh/amqp-routing-inspector/internal/graph"
 	"github.com/kumarlokesh/amqp-routing-inspector/internal/model"
 )
@@ -19,7 +20,8 @@ type Renderer interface {
 	Close() error
 }
 
-// NewRenderer returns a renderer for cli, json or dot outputs.
+// NewRenderer returns a renderer for cli, json, dot, summary, or mermaid outputs.
+// For prometheus, statsd, and web formats use NewRendererFromConfig.
 func NewRenderer(format string, writer io.Writer, graphName string) (Renderer, error) {
 	if writer == nil {
 		writer = io.Discard
@@ -34,10 +36,47 @@ func NewRenderer(format string, writer io.Writer, graphName string) (Renderer, e
 		return &jsonRenderer{encoder: encoder}, nil
 	case "dot":
 		return &dotRenderer{writer: writer, graph: graph.New(graphName)}, nil
+	case "summary":
+		return newSummaryRenderer(writer), nil
+	case "mermaid":
+		return newMermaidRenderer(writer, graphName), nil
 	default:
 		return nil, fmt.Errorf("unsupported renderer format %q", format)
 	}
 }
+
+// NewRendererFromConfig creates a renderer using full Config, supporting all output formats
+// including prometheus, statsd, and web which require network addresses.
+func NewRendererFromConfig(cfg config.Config, writer io.Writer) (Renderer, error) {
+	if writer == nil {
+		writer = io.Discard
+	}
+
+	switch cfg.OutputFormat {
+	case config.FormatCLI:
+		return &cliRenderer{writer: writer}, nil
+	case config.FormatJSON:
+		encoder := json.NewEncoder(writer)
+		encoder.SetEscapeHTML(false)
+		return &jsonRenderer{encoder: encoder}, nil
+	case config.FormatDOT:
+		return &dotRenderer{writer: writer, graph: graph.New(cfg.GraphName)}, nil
+	case config.FormatSummary:
+		return newSummaryRenderer(writer), nil
+	case config.FormatMermaid:
+		return newMermaidRenderer(writer, cfg.GraphName), nil
+	case config.FormatPrometheus:
+		return newPrometheusRenderer(writer, cfg.MetricsAddr)
+	case config.FormatStatsd:
+		return newStatsdRenderer(writer, cfg.StatsdAddr)
+	case config.FormatWeb:
+		return newWebRenderer(writer, cfg.WebAddr)
+	default:
+		return nil, fmt.Errorf("unsupported renderer format %q", cfg.OutputFormat)
+	}
+}
+
+// ── CLI renderer ──────────────────────────────────────────────────────────────
 
 type cliRenderer struct {
 	writer io.Writer
@@ -51,9 +90,8 @@ func (r *cliRenderer) RenderTrace(trace model.RoutingTrace) error {
 	}
 
 	timestamp := event.Timestamp.UTC().Format(time.RFC3339Nano)
-	_, err := fmt.Fprintf(
-		r.writer,
-		"%s exchange=%s type=%s routing_key=%s message_id=%s destinations=%s\n",
+	line := fmt.Sprintf(
+		"%s exchange=%s type=%s routing_key=%s message_id=%s destinations=%s",
 		timestamp,
 		emptyFallback(event.ExchangeName, "(unknown-exchange)"),
 		emptyFallback(event.ExchangeType, "(unknown-type)"),
@@ -61,12 +99,18 @@ func (r *cliRenderer) RenderTrace(trace model.RoutingTrace) error {
 		emptyFallback(event.MessageID, "(no-message-id)"),
 		formatDestinations(destinations),
 	)
+
+	if event.BodyPreview != "" {
+		line += fmt.Sprintf(" body=%q", event.BodyPreview)
+	}
+
+	_, err := fmt.Fprintln(r.writer, line)
 	return err
 }
 
-func (r *cliRenderer) Close() error {
-	return nil
-}
+func (r *cliRenderer) Close() error { return nil }
+
+// ── JSON renderer ─────────────────────────────────────────────────────────────
 
 type jsonRenderer struct {
 	encoder *json.Encoder
@@ -76,9 +120,9 @@ func (r *jsonRenderer) RenderTrace(trace model.RoutingTrace) error {
 	return r.encoder.Encode(trace)
 }
 
-func (r *jsonRenderer) Close() error {
-	return nil
-}
+func (r *jsonRenderer) Close() error { return nil }
+
+// ── DOT renderer ──────────────────────────────────────────────────────────────
 
 type dotRenderer struct {
 	writer io.Writer
@@ -108,6 +152,8 @@ func (r *dotRenderer) Close() error {
 	_, err := io.WriteString(r.writer, r.graph.DOT())
 	return err
 }
+
+// ── helpers ───────────────────────────────────────────────────────────────────
 
 func formatDestinations(destinations []model.QueueDestination) string {
 	if len(destinations) == 0 {

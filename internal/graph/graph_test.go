@@ -65,3 +65,21 @@ func TestGraphDOTContainsNodesAndEdges(t *testing.T) {
 		}
 	}
 }
+
+func TestGraphMermaidContainsNodesAndEdges(t *testing.T) {
+	g := New("test")
+	g.AddTrace(model.RoutingTrace{
+		Event: model.RoutingEvent{
+			ExchangeName: "orders",
+			RoutingKey:   "order.created",
+		},
+		Destinations: []model.QueueDestination{{QueueName: "payments.q", BindingKey: "order.*"}},
+	})
+
+	out := g.Mermaid()
+	for _, want := range []string{"flowchart LR", "exchange: orders", "queue: payments.q", "order.*"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("mermaid output missing %q\noutput=%s", want, out)
+		}
+	}
+}

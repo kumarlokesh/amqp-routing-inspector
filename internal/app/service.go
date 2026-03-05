@@ -42,8 +42,9 @@ type Parser interface {
 
 // Service orchestrates connection, consumption, parsing, filtering and rendering.
 type Service struct {
-	logger    *log.Logger
-	maxEvents int
+	logger       *log.Logger
+	maxEvents    int
+	warnUnrouted bool
 
 	connector Connector
 	consumer  firehose.DeliveryConsumer
@@ -60,7 +61,7 @@ func New(cfg config.Config, logger *log.Logger, writer io.Writer) (*Service, err
 		logger = log.New(io.Discard, "", 0)
 	}
 
-	renderer, err := output.NewRenderer(cfg.OutputFormat, writer, cfg.GraphName)
+	renderer, err := output.NewRendererFromConfig(cfg, writer)
 	if err != nil {
 		return nil, fmt.Errorf("initialize renderer: %w", err)
 	}
@@ -99,13 +100,14 @@ func NewWithDeps(
 	}
 
 	return &Service{
-		logger:    logger,
-		maxEvents: cfg.MaxEvents,
+		logger:       logger,
+		maxEvents:    cfg.MaxEvents,
+		warnUnrouted: cfg.WarnUnrouted,
 
 		connector: connector,
 		consumer:  consumer,
-		parser:    parserpkg.New(),
-		matcher:   filter.NewMatcher(cfg.FilterExchange, cfg.FilterQueue),
+		parser:    parserpkg.NewWithConfig(cfg.ShowBodyBytes),
+		matcher:   filter.NewMatcher(cfg.FilterExchange, cfg.FilterQueue, cfg.FilterRoutingKey, cfg.FilterEvent),
 		renderer:  renderer,
 	}, nil
 }
@@ -211,6 +213,11 @@ func (s *Service) handleDelivery(delivery amqp.Delivery) error {
 	if err != nil {
 		s.logger.Printf("failed to parse routing delivery routing_key=%q: %v", delivery.RoutingKey, err)
 		return nil
+	}
+
+	if s.warnUnrouted && event.EventType == "publish" && len(event.Destinations) == 0 {
+		s.logger.Printf("WARN unrouted message exchange=%s routing_key=%s message_id=%s",
+			event.ExchangeName, event.RoutingKey, event.MessageID)
 	}
 
 	trace := model.RoutingTrace{

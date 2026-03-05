@@ -15,9 +15,14 @@ import (
 )
 
 const (
-	FormatCLI  = "cli"
-	FormatJSON = "json"
-	FormatDOT  = "dot"
+	FormatCLI        = "cli"
+	FormatJSON       = "json"
+	FormatDOT        = "dot"
+	FormatSummary    = "summary"
+	FormatMermaid    = "mermaid"
+	FormatPrometheus = "prometheus"
+	FormatStatsd     = "statsd"
+	FormatWeb        = "web"
 )
 
 // ErrHelpRequested is returned when -h/--help is requested.
@@ -35,11 +40,18 @@ type Config struct {
 	OutputFormat     string        `yaml:"output_format"`
 	FilterExchange   string        `yaml:"filter_exchange"`
 	FilterQueue      string        `yaml:"filter_queue"`
+	FilterRoutingKey string        `yaml:"filter_routing_key"`
+	FilterEvent      string        `yaml:"filter_event"`
 	MaxEvents        int           `yaml:"max_events"`
 	Prefetch         int           `yaml:"prefetch"`
 	ReconnectInitial time.Duration `yaml:"reconnect_initial"`
 	ReconnectMax     time.Duration `yaml:"reconnect_max"`
 	GraphName        string        `yaml:"graph_name"`
+	WarnUnrouted     bool          `yaml:"warn_unrouted"`
+	ShowBodyBytes    int           `yaml:"show_body_bytes"`
+	MetricsAddr      string        `yaml:"metrics_addr"`
+	StatsdAddr       string        `yaml:"statsd_addr"`
+	WebAddr          string        `yaml:"web_addr"`
 }
 
 // Default returns a production-sensible configuration baseline.
@@ -52,11 +64,18 @@ func Default() Config {
 		OutputFormat:     FormatCLI,
 		FilterExchange:   "",
 		FilterQueue:      "",
+		FilterRoutingKey: "",
+		FilterEvent:      "",
 		MaxEvents:        0,
 		Prefetch:         200,
 		ReconnectInitial: 1 * time.Second,
 		ReconnectMax:     30 * time.Second,
 		GraphName:        "routing",
+		WarnUnrouted:     false,
+		ShowBodyBytes:    0,
+		MetricsAddr:      "",
+		StatsdAddr:       "",
+		WebAddr:          "",
 	}
 }
 
@@ -103,6 +122,11 @@ func (c *Config) Validate() error {
 	c.FirehoseExchange = strings.TrimSpace(c.FirehoseExchange)
 	c.FilterExchange = strings.TrimSpace(c.FilterExchange)
 	c.FilterQueue = strings.TrimSpace(c.FilterQueue)
+	c.FilterRoutingKey = strings.TrimSpace(c.FilterRoutingKey)
+	c.FilterEvent = strings.ToLower(strings.TrimSpace(c.FilterEvent))
+	c.MetricsAddr = strings.TrimSpace(c.MetricsAddr)
+	c.StatsdAddr = strings.TrimSpace(c.StatsdAddr)
+	c.WebAddr = strings.TrimSpace(c.WebAddr)
 
 	if c.RabbitMQURL == "" {
 		return errors.New("rabbitmq-url must not be empty")
@@ -115,9 +139,13 @@ func (c *Config) Validate() error {
 	}
 
 	switch c.OutputFormat {
-	case FormatCLI, FormatJSON, FormatDOT:
+	case FormatCLI, FormatJSON, FormatDOT, FormatSummary, FormatMermaid, FormatPrometheus, FormatStatsd, FormatWeb:
 	default:
-		return fmt.Errorf("unsupported output format %q (allowed: cli, json, dot)", c.OutputFormat)
+		return fmt.Errorf("unsupported output format %q (allowed: cli, json, dot, summary, mermaid, prometheus, statsd, web)", c.OutputFormat)
+	}
+
+	if c.FilterEvent != "" && c.FilterEvent != "publish" && c.FilterEvent != "deliver" {
+		return fmt.Errorf("filter-event must be 'publish' or 'deliver', got %q", c.FilterEvent)
 	}
 
 	if c.Prefetch <= 0 {
@@ -125,6 +153,9 @@ func (c *Config) Validate() error {
 	}
 	if c.MaxEvents < 0 {
 		return errors.New("max-events must be >= 0")
+	}
+	if c.ShowBodyBytes < 0 {
+		return errors.New("show-body-bytes must be >= 0")
 	}
 	if c.ReconnectInitial <= 0 {
 		return errors.New("reconnect-initial must be greater than 0")
@@ -134,6 +165,16 @@ func (c *Config) Validate() error {
 	}
 	if c.ReconnectMax < c.ReconnectInitial {
 		return errors.New("reconnect-max must be >= reconnect-initial")
+	}
+
+	if c.OutputFormat == FormatPrometheus && c.MetricsAddr == "" {
+		return errors.New("--metrics-addr is required when --output prometheus")
+	}
+	if c.OutputFormat == FormatStatsd && c.StatsdAddr == "" {
+		return errors.New("--statsd-addr is required when --output statsd")
+	}
+	if c.OutputFormat == FormatWeb && c.WebAddr == "" {
+		return errors.New("--web-addr is required when --output web")
 	}
 
 	return nil
@@ -168,11 +209,18 @@ func Usage() string {
 	builder.WriteString("  AMQP_INSPECTOR_OUTPUT_FORMAT\n")
 	builder.WriteString("  AMQP_INSPECTOR_FILTER_EXCHANGE\n")
 	builder.WriteString("  AMQP_INSPECTOR_FILTER_QUEUE\n")
+	builder.WriteString("  AMQP_INSPECTOR_FILTER_ROUTING_KEY\n")
+	builder.WriteString("  AMQP_INSPECTOR_FILTER_EVENT\n")
 	builder.WriteString("  AMQP_INSPECTOR_MAX_EVENTS\n")
 	builder.WriteString("  AMQP_INSPECTOR_PREFETCH\n")
 	builder.WriteString("  AMQP_INSPECTOR_RECONNECT_INITIAL\n")
 	builder.WriteString("  AMQP_INSPECTOR_RECONNECT_MAX\n")
 	builder.WriteString("  AMQP_INSPECTOR_GRAPH_NAME\n")
+	builder.WriteString("  AMQP_INSPECTOR_WARN_UNROUTED\n")
+	builder.WriteString("  AMQP_INSPECTOR_SHOW_BODY_BYTES\n")
+	builder.WriteString("  AMQP_INSPECTOR_METRICS_ADDR\n")
+	builder.WriteString("  AMQP_INSPECTOR_STATSD_ADDR\n")
+	builder.WriteString("  AMQP_INSPECTOR_WEB_ADDR\n")
 
 	return builder.String()
 }
@@ -192,14 +240,21 @@ func newFlagSet(cfg *Config, output io.Writer) (*flag.FlagSet, *string) {
 	fs.StringVar(&cfg.FirehoseExchange, "firehose-exchange", cfg.FirehoseExchange, "RabbitMQ firehose exchange")
 	fs.StringVar(&cfg.QueueName, "queue-name", cfg.QueueName, "Queue name used for consuming firehose (empty means auto-generated ephemeral queue)")
 	fs.StringVar(&cfg.ConsumerTag, "consumer-tag", cfg.ConsumerTag, "Consumer tag")
-	fs.StringVar(&cfg.OutputFormat, "output", cfg.OutputFormat, "Output format: cli|json|dot")
-	fs.StringVar(&cfg.FilterExchange, "filter-exchange", cfg.FilterExchange, "Only include events from this exchange")
-	fs.StringVar(&cfg.FilterQueue, "filter-queue", cfg.FilterQueue, "Only include events routed to this queue")
+	fs.StringVar(&cfg.OutputFormat, "output", cfg.OutputFormat, "Output format: cli|json|dot|summary|mermaid|prometheus|statsd|web")
+	fs.StringVar(&cfg.FilterExchange, "filter-exchange", cfg.FilterExchange, "Only include events from this exchange (supports glob: orders.*, ?rders)")
+	fs.StringVar(&cfg.FilterQueue, "filter-queue", cfg.FilterQueue, "Only include events routed to this queue (supports glob)")
+	fs.StringVar(&cfg.FilterRoutingKey, "filter-routing-key", cfg.FilterRoutingKey, "Only include events with this routing key (supports AMQP wildcards: * and #)")
+	fs.StringVar(&cfg.FilterEvent, "filter-event", cfg.FilterEvent, "Only include events of this type: publish|deliver")
 	fs.IntVar(&cfg.MaxEvents, "max-events", cfg.MaxEvents, "Stop after N matched events (0 means unlimited)")
 	fs.IntVar(&cfg.Prefetch, "prefetch", cfg.Prefetch, "AMQP prefetch count")
 	fs.DurationVar(&cfg.ReconnectInitial, "reconnect-initial", cfg.ReconnectInitial, "Initial reconnect backoff")
 	fs.DurationVar(&cfg.ReconnectMax, "reconnect-max", cfg.ReconnectMax, "Maximum reconnect backoff")
-	fs.StringVar(&cfg.GraphName, "graph-name", cfg.GraphName, "Graph name used for DOT output")
+	fs.StringVar(&cfg.GraphName, "graph-name", cfg.GraphName, "Graph name used for DOT/Mermaid output")
+	fs.BoolVar(&cfg.WarnUnrouted, "warn-unrouted", cfg.WarnUnrouted, "Log a warning for publish events with no queue destinations")
+	fs.IntVar(&cfg.ShowBodyBytes, "show-body-bytes", cfg.ShowBodyBytes, "Include first N bytes of message body in output (0 disables)")
+	fs.StringVar(&cfg.MetricsAddr, "metrics-addr", cfg.MetricsAddr, "HTTP address for Prometheus metrics endpoint (required for --output prometheus)")
+	fs.StringVar(&cfg.StatsdAddr, "statsd-addr", cfg.StatsdAddr, "UDP address for StatsD metrics (required for --output statsd)")
+	fs.StringVar(&cfg.WebAddr, "web-addr", cfg.WebAddr, "HTTP address for live routing graph web UI (required for --output web)")
 
 	return fs, configPath
 }
@@ -247,7 +302,12 @@ func applyEnv(cfg *Config) error {
 	applyEnvString("AMQP_INSPECTOR_OUTPUT_FORMAT", &cfg.OutputFormat)
 	applyEnvString("AMQP_INSPECTOR_FILTER_EXCHANGE", &cfg.FilterExchange)
 	applyEnvString("AMQP_INSPECTOR_FILTER_QUEUE", &cfg.FilterQueue)
+	applyEnvString("AMQP_INSPECTOR_FILTER_ROUTING_KEY", &cfg.FilterRoutingKey)
+	applyEnvString("AMQP_INSPECTOR_FILTER_EVENT", &cfg.FilterEvent)
 	applyEnvString("AMQP_INSPECTOR_GRAPH_NAME", &cfg.GraphName)
+	applyEnvString("AMQP_INSPECTOR_METRICS_ADDR", &cfg.MetricsAddr)
+	applyEnvString("AMQP_INSPECTOR_STATSD_ADDR", &cfg.StatsdAddr)
+	applyEnvString("AMQP_INSPECTOR_WEB_ADDR", &cfg.WebAddr)
 
 	if err := applyEnvInt("AMQP_INSPECTOR_MAX_EVENTS", &cfg.MaxEvents); err != nil {
 		return err
@@ -255,10 +315,16 @@ func applyEnv(cfg *Config) error {
 	if err := applyEnvInt("AMQP_INSPECTOR_PREFETCH", &cfg.Prefetch); err != nil {
 		return err
 	}
+	if err := applyEnvInt("AMQP_INSPECTOR_SHOW_BODY_BYTES", &cfg.ShowBodyBytes); err != nil {
+		return err
+	}
 	if err := applyEnvDuration("AMQP_INSPECTOR_RECONNECT_INITIAL", &cfg.ReconnectInitial); err != nil {
 		return err
 	}
 	if err := applyEnvDuration("AMQP_INSPECTOR_RECONNECT_MAX", &cfg.ReconnectMax); err != nil {
+		return err
+	}
+	if err := applyEnvBool("AMQP_INSPECTOR_WARN_UNROUTED", &cfg.WarnUnrouted); err != nil {
 		return err
 	}
 
@@ -295,6 +361,19 @@ func applyEnvDuration(name string, out *time.Duration) error {
 	parsed, err := time.ParseDuration(strings.TrimSpace(value))
 	if err != nil {
 		return fmt.Errorf("invalid duration in %s: %w", name, err)
+	}
+	*out = parsed
+	return nil
+}
+
+func applyEnvBool(name string, out *bool) error {
+	value, ok := os.LookupEnv(name)
+	if !ok {
+		return nil
+	}
+	parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+	if err != nil {
+		return fmt.Errorf("invalid boolean in %s: %w", name, err)
 	}
 	*out = parsed
 	return nil

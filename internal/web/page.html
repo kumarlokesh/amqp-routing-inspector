@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AMQP Routing Inspector</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Helvetica Neue', Arial, sans-serif; background: #f0f2f5; color: #1a1a2e; }
+    header { background: #1a1a2e; color: #e8f1ff; padding: 14px 24px; display: flex; align-items: center; gap: 16px; }
+    header h1 { font-size: 1.1rem; font-weight: 600; letter-spacing: .02em; }
+    #status { font-size: 0.8rem; padding: 3px 10px; border-radius: 12px; background: #374151; color: #9ca3af; }
+    #status.connected { background: #166534; color: #bbf7d0; }
+    #status.error { background: #7f1d1d; color: #fecaca; }
+    #counter { font-size: 0.8rem; color: #9ca3af; margin-left: auto; }
+    main { display: grid; grid-template-columns: 320px 1fr; height: calc(100vh - 50px); }
+    aside { background: #fff; border-right: 1px solid #e5e7eb; overflow-y: auto; padding: 16px; }
+    aside h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: .08em; color: #6b7280; margin-bottom: 10px; }
+    #event-list { display: flex; flex-direction: column; gap: 6px; }
+    .event-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px 10px; font-size: 0.78rem; cursor: default; }
+    .event-card:hover { border-color: #6366f1; }
+    .event-card .exch { font-weight: 600; color: #3730a3; }
+    .event-card .rk { color: #374151; margin-top: 2px; }
+    .event-card .dest { color: #6b7280; font-size: 0.72rem; margin-top: 2px; }
+    .event-card .badge { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 0.68rem; font-weight: 600; margin-right: 4px; }
+    .badge-publish { background: #dbeafe; color: #1e40af; }
+    .badge-deliver { background: #dcfce7; color: #166534; }
+    #graph-area { display: flex; align-items: center; justify-content: center; padding: 24px; overflow: auto; background: #f8fafc; }
+    #mermaid-container { background: white; border-radius: 10px; box-shadow: 0 1px 8px rgba(0,0,0,.08); padding: 32px; min-width: 400px; min-height: 200px; display: flex; align-items: center; justify-content: center; }
+    #mermaid-container svg { max-width: 100%; height: auto; }
+    #empty-msg { color: #9ca3af; font-size: 0.9rem; text-align: center; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>⬡ AMQP Routing Inspector</h1>
+    <span id="status">connecting…</span>
+    <span id="counter">0 events</span>
+  </header>
+  <main>
+    <aside>
+      <h2>Recent Events</h2>
+      <div id="event-list"></div>
+    </aside>
+    <div id="graph-area">
+      <div id="mermaid-container">
+        <div id="empty-msg">Waiting for routing events…</div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    mermaid.initialize({ startOnLoad: false, theme: 'base', themeVariables: {
+      primaryColor: '#E8F1FF', primaryTextColor: '#1a1a2e', edgeLabelBackground: '#fff',
+      lineColor: '#6366f1', fontSize: '13px'
+    }});
+
+    // Graph state: exchange→queue→label→count
+    const edges = {}; // "ex|q|label" => count
+    const exchanges = new Set();
+    const queues = new Set();
+    let totalEvents = 0;
+    let renderPending = false;
+
+    const statusEl = document.getElementById('status');
+    const counterEl = document.getElementById('counter');
+    const eventList = document.getElementById('event-list');
+    const graphContainer = document.getElementById('mermaid-container');
+    const emptyMsg = document.getElementById('empty-msg');
+
+    function setStatus(s, cls) {
+      statusEl.textContent = s;
+      statusEl.className = cls || '';
+    }
+
+    function addEvent(ev) {
+      const card = document.createElement('div');
+      card.className = 'event-card';
+      const badgeClass = ev.event_type === 'publish' ? 'badge-publish' : 'badge-deliver';
+      const dests = (ev.destinations || []).map(d => d.queue_name).join(', ') || '(none)';
+      card.innerHTML = `<span class="badge ${badgeClass}">${ev.event_type || '?'}</span><span class="exch">${escHtml(ev.exchange_name)}</span>
+        <div class="rk">⟶ ${escHtml(ev.routing_key || '')}</div>
+        <div class="dest">${escHtml(dests)}</div>`;
+      eventList.prepend(card);
+      // Keep max 50 cards
+      while (eventList.children.length > 50) eventList.removeChild(eventList.lastChild);
+    }
+
+    function updateGraph(ev) {
+      const exchange = ev.exchange_name || '(unknown)';
+      const dests = ev.destinations || [];
+      exchanges.add(exchange);
+
+      if (dests.length === 0) {
+        const q = '(unrouted)';
+        queues.add(q);
+        const label = ev.routing_key || '(no-key)';
+        const key = `${exchange}|${q}|${label}`;
+        edges[key] = (edges[key] || 0) + 1;
+      }
+      for (const d of dests) {
+        const q = d.queue_name || '(unknown-queue)';
+        queues.add(q);
+        const label = d.binding_key || ev.routing_key || '(no-key)';
+        const key = `${exchange}|${q}|${label}`;
+        edges[key] = (edges[key] || 0) + 1;
+      }
+    }
+
+    function mermaidID(s) { return s.replace(/[^a-zA-Z0-9_]/g, '_'); }
+    function mermaidEsc(s) { return String(s).replace(/"/g, '&quot;'); }
+
+    async function rerenderGraph() {
+      if (exchanges.size === 0) return;
+      emptyMsg && emptyMsg.remove();
+
+      let def = 'flowchart LR\n';
+      for (const ex of [...exchanges].sort()) {
+        def += `  ${mermaidID('ex_'+ex)}["exchange: ${mermaidEsc(ex)}"]\n`;
+      }
+      for (const q of [...queues].sort()) {
+        def += `  ${mermaidID('q_'+q)}(["queue: ${mermaidEsc(q)}"])\n`;
+      }
+
+      // Sort edges for deterministic output
+      const edgeKeys = Object.keys(edges).sort();
+      for (const k of edgeKeys) {
+        const [ex, q, label] = k.split('|');
+        const count = edges[k];
+        def += `  ${mermaidID('ex_'+ex)} -- "${mermaidEsc(label)} (${count})" --> ${mermaidID('q_'+q)}\n`;
+      }
+
+      try {
+        const id = 'graph-' + Date.now();
+        const { svg } = await mermaid.render(id, def);
+        graphContainer.innerHTML = svg;
+      } catch(e) {
+        // Keep previous render on error
+      }
+    }
+
+    function scheduleRender() {
+      if (renderPending) return;
+      renderPending = true;
+      setTimeout(() => { renderPending = false; rerenderGraph(); }, 500);
+    }
+
+    function escHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function connect() {
+      const es = new EventSource('/events');
+      es.onopen = () => setStatus('connected', 'connected');
+      es.onerror = () => {
+        setStatus('reconnecting…', 'error');
+        es.close();
+        setTimeout(connect, 3000);
+      };
+      es.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          const ev = data.event || data;
+          const dests = data.destinations || ev.destinations || [];
+          ev.destinations = dests;
+
+          totalEvents++;
+          counterEl.textContent = totalEvents + ' event' + (totalEvents === 1 ? '' : 's');
+          addEvent(ev);
+          updateGraph(ev);
+          scheduleRender();
+        } catch (_) {}
+      };
+    }
+
+    connect();
+  </script>
+</body>
+</html>
